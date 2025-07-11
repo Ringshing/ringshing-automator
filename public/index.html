@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ringshing - Conversation Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .chat-bubble-outbound { background-color: #dcf8c6; }
+        .chat-bubble-inbound { background-color: #ffffff; }
+    </style>
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto p-4">
+        <header class="mb-6">
+            <h1 class="text-4xl font-bold text-gray-800">Conversation Dashboard</h1>
+            <p class="text-gray-500">Live view of customer conversations from WhatsApp.</p>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Conversations List -->
+            <div id="conversations-list" class="md:col-span-1 bg-white rounded-lg shadow p-4 overflow-y-auto h-[80vh]">
+                <h2 class="text-xl font-bold mb-4 border-b pb-2">Conversations</h2>
+                <div id="convo-list-container">
+                    <p class="text-gray-500">Loading conversations...</p>
+                </div>
+            </div>
+
+            <!-- Chat Window -->
+            <div id="chat-window" class="md:col-span-2 bg-white rounded-lg shadow flex flex-col h-[80vh]">
+                <div id="chat-header" class="p-4 border-b">
+                    <h2 class="font-bold text-lg text-gray-800">Select a conversation</h2>
+                </div>
+                <div id="message-container" class="flex-1 p-4 overflow-y-auto bg-gray-50">
+                    <!-- Messages will be loaded here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Firebase SDK (Updated Version) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+
+    <script>
+        // --- START: PASTE YOUR FIREBASE CONFIG HERE ---
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        // --- END: PASTE YOUR FIREBASE CONFIG HERE ---
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const convoListContainer = document.getElementById('convo-list-container');
+        const chatHeader = document.getElementById('chat-header');
+        const messageContainer = document.getElementById('message-container');
+
+        let activeConversationUnsubscribe = null;
+
+        // Function to display messages for a selected conversation
+        function showConversation(phone) {
+            chatHeader.innerHTML = `<h2 class="font-bold text-lg text-gray-800">Chat with: ${phone}</h2>`;
+            messageContainer.innerHTML = '<p class="text-center text-gray-500">Loading messages...</p>';
+
+            // Unsubscribe from previous listener
+            if (activeConversationUnsubscribe) {
+                activeConversationUnsubscribe();
+            }
+
+            const messagesRef = db.collection('conversations').doc(phone).collection('messages').orderBy('timestamp', 'asc');
+            
+            activeConversationUnsubscribe = messagesRef.onSnapshot(snapshot => {
+                messageContainer.innerHTML = ''; // Clear previous messages
+                snapshot.forEach(doc => {
+                    const msg = doc.data();
+                    const bubble = document.createElement('div');
+                    bubble.classList.add('p-3', 'rounded-lg', 'max-w-md', 'mb-2', 'shadow-sm');
+                    
+                    const content = document.createElement('p');
+                    content.innerText = msg.content;
+                    
+                    const timestamp = document.createElement('p');
+                    timestamp.classList.add('text-xs', 'text-gray-500', 'mt-1', 'text-right');
+                    timestamp.innerText = msg.timestamp ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString() : '';
+
+                    if (msg.direction === 'outbound') {
+                        bubble.classList.add('chat-bubble-outbound', 'ml-auto');
+                    } else {
+                        bubble.classList.add('chat-bubble-inbound', 'mr-auto', 'border');
+                    }
+
+                    bubble.appendChild(content);
+                    bubble.appendChild(timestamp);
+                    messageContainer.appendChild(bubble);
+                });
+                // Scroll to the bottom
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }, (error) => {
+                // More robust error handling
+                console.error("Firestore snapshot error: ", error);
+                messageContainer.innerHTML = `<p class="text-center text-red-500">Error loading messages. Please check the console.</p>`;
+            });
+        }
+
+        // Listen for all conversations and update the list in real-time
+        db.collection('conversations').onSnapshot(snapshot => {
+            convoListContainer.innerHTML = '';
+            if (snapshot.empty) {
+                convoListContainer.innerHTML = '<p class="text-gray-500">No conversations yet.</p>';
+                return;
+            }
+            snapshot.forEach(doc => {
+                const phone = doc.id;
+                const convoItem = document.createElement('div');
+                convoItem.classList.add('p-3', 'hover:bg-gray-100', 'cursor-pointer', 'rounded-md', 'border-b');
+                convoItem.innerText = phone;
+                convoItem.onclick = () => showConversation(phone);
+                convoListContainer.appendChild(convoItem);
+            });
+        }, (error) => {
+            // More robust error handling
+            console.error("Firestore conversations listener error: ", error);
+            convoListContainer.innerHTML = '<p class="text-red-500">Error loading conversations list.</p>';
+        });
+
+    </script>
+</body>
+</html>
