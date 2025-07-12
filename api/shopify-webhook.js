@@ -259,7 +259,7 @@ module.exports = async (req, res) => {
 
         res.status(200).send('OK: Processed.');
 
-    } catch (error) { // *** FIX IS HERE: Removed the typo underscore ***
+    } catch (error) {
         console.error("Webhook Error:", error);
         res.status(500).send('Error processing webhook.');
     }
