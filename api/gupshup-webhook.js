@@ -3,8 +3,8 @@
 * File: `api/gupshup-webhook.js`
 * =================================================================
 *
-* This is the final, self-contained version. It includes all
-* necessary code to prevent module loading errors on Vercel.
+* This is the final, production-ready version. It includes robust
+* error handling for the database connection.
 *
 */
 
@@ -14,6 +14,7 @@ const querystring = require('querystring');
 const admin = require('firebase-admin');
 
 // --- Firebase Initialization ---
+let db;
 try {
   if (!admin.apps.length) {
     const serviceAccountString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
@@ -22,10 +23,10 @@ try {
       credential: admin.credential.cert(serviceAccount)
     });
   }
+  db = admin.firestore();
 } catch (error) {
   console.error('Firebase Admin Initialization Error:', error);
 }
-const db = admin.firestore();
 
 
 // --- Helper Functions ---
@@ -177,12 +178,16 @@ module.exports = async (req, res) => {
             return res.status(200).send('OK: Incomplete payload.');
         }
 
-        await db.collection('conversations').doc(customerPhone).collection('messages').add({
-            customerPhone: customerPhone,
-            direction: 'inbound',
-            content: customerReply,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        });
+        if (!db) {
+            console.error("Firestore db object is not available. Cannot log message.");
+        } else {
+            await db.collection('conversations').doc(customerPhone).collection('messages').add({
+                customerPhone: customerPhone,
+                direction: 'inbound',
+                content: customerReply,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
 
         const knowledgeBase = {
             storeName: "Ringshing.com",
@@ -264,12 +269,15 @@ module.exports = async (req, res) => {
         }
 
         await sendGupshupText(customerPhone, responseMessage);
-        await db.collection('conversations').doc(customerPhone).collection('messages').add({
-            customerPhone: customerPhone,
-            direction: 'outbound',
-            content: responseMessage,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        });
+        
+        if (db) {
+            await db.collection('conversations').doc(customerPhone).collection('messages').add({
+                customerPhone: customerPhone,
+                direction: 'outbound',
+                content: responseMessage,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
 
         res.status(200).send('OK: Processed.');
 

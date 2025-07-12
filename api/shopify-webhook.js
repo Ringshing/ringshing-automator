@@ -3,8 +3,8 @@
 * File: `api/shopify-webhook.js`
 * =================================================================
 *
-* This is the final, self-contained version. It includes all
-* necessary code to prevent module loading errors on Vercel.
+* This is the final, production-ready version. It includes robust
+* error handling for the database connection.
 *
 */
 
@@ -14,7 +14,7 @@ const querystring = require('querystring');
 const admin = require('firebase-admin');
 
 // --- Firebase Initialization ---
-// The database connection logic is now inside this file.
+let db;
 try {
   if (!admin.apps.length) {
     const serviceAccountString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
@@ -23,10 +23,10 @@ try {
       credential: admin.credential.cert(serviceAccount)
     });
   }
+  db = admin.firestore();
 } catch (error) {
   console.error('Firebase Admin Initialization Error:', error);
 }
-const db = admin.firestore();
 
 
 // --- Helper Functions ---
@@ -170,13 +170,17 @@ module.exports = async (req, res) => {
         const templateParams = [customerName, orderName, productName, orderAmount, advancePayment, shippingAddress];
         await sendGupshupTemplateMessage(phone, templateParams);
 
-        const messageLog = {
-            customerPhone: phone,
-            direction: 'outbound',
-            content: `Sent COD confirmation for order ${orderName}`,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        };
-        await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+        if (!db) {
+            console.error("Firestore db object is not available. Cannot log message.");
+        } else {
+            const messageLog = {
+                customerPhone: phone,
+                direction: 'outbound',
+                content: `Sent COD confirmation for order ${orderName}`,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            };
+            await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+        }
 
         const tagMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
         await shopifyFetch({ query: tagMutation, variables: { id: orderId, tags: ["COD-Confirmation-Sent"] } });
