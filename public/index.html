@@ -18,6 +18,10 @@
         <header class="mb-6">
             <h1 class="text-4xl font-bold text-gray-800">Conversation Dashboard</h1>
             <p class="text-gray-500">Live view of customer conversations from WhatsApp.</p>
+            <div id="status-messages" class="mt-2 text-sm">
+                <p id="firebase-status" class="text-gray-600">Initializing Firebase...</p>
+                <p id="auth-status" class="text-gray-600">Checking authentication status...</p>
+            </div>
         </header>
 
         <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -44,55 +48,134 @@
     <!-- Firebase SDK (Updated Version) -->
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script> <!-- Added Auth SDK -->
 
     <script>
         // --- START: PASTE YOUR FIREBASE CONFIG HERE ---
         const firebaseConfig = {
-  apiKey: "AIzaSyDHjF-WIBUxmL0_UNhv2SpMC2Bw0nanmX0",
-  authDomain: "ringshing-automater.firebaseapp.com",
-  projectId: "ringshing-automater",
-  storageBucket: "ringshing-automater.firebasestorage.app",
-  messagingSenderId: "264267835441",
-  appId: "1:264267835441:web:6d77ddf66376d9dae88d10",
-  measurementId: "G-XQVGHZ9MR6"
-};
+            apiKey: "AIzaSyDHjF-WIBUxmL0_UNhv2SpMC2Bw0nanmX0",
+            authDomain: "ringshing-automater.firebaseapp.com",
+            projectId: "ringshing-automater",
+            storageBucket: "ringshing-automater.firebasestorage.app",
+            messagingSenderId: "264267835441",
+            appId: "1:264267835441:web:6d77ddf66376d9dae88d10"
+        };
         // --- END: PASTE YOUR FIREBASE CONFIG HERE ---
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+        console.log("1. Script started.");
 
+        const firebaseStatusElement = document.getElementById('firebase-status');
+        const authStatusElement = document.getElementById('auth-status');
         const convoListContainer = document.getElementById('convo-list-container');
         const chatHeader = document.getElementById('chat-header');
         const messageContainer = document.getElementById('message-container');
 
+        let db; // Firestore instance
+        let auth; // Auth instance
         let activeConversationUnsubscribe = null;
+        let isAuthReady = false; // Flag to ensure Firestore operations wait for auth
+
+        // Initialize Firebase
+        try {
+            const app = firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            auth = firebase.auth(); // Get Auth instance
+
+            firebaseStatusElement.innerText = "Firebase initialized successfully.";
+            firebaseStatusElement.classList.add('text-green-600');
+            console.log("2. Firebase initialized successfully.");
+            console.log("3. Firestore instance obtained.");
+            console.log("4. Auth instance obtained.");
+
+            // Listen for authentication state changes
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    authStatusElement.innerText = `Authenticated as: ${user.uid} (Anonymous)`;
+                    authStatusElement.classList.remove('text-red-600');
+                    authStatusElement.classList.add('text-green-600');
+                    console.log("5. User is authenticated:", user.uid);
+                    isAuthReady = true;
+                    // Start fetching conversations only after authentication is ready
+                    fetchConversations();
+                } else {
+                    authStatusElement.innerText = "Not authenticated. Attempting anonymous sign-in...";
+                    authStatusElement.classList.remove('text-green-600');
+                    authStatusElement.classList.add('text-yellow-600');
+                    console.log("5. No user authenticated. Attempting anonymous sign-in.");
+                    isAuthReady = false;
+                    // Attempt anonymous sign-in
+                    auth.signInAnonymously()
+                        .then(() => {
+                            console.log("6. Anonymous sign-in successful.");
+                            // onAuthStateChanged will be triggered again with the new user
+                        })
+                        .catch((error) => {
+                            authStatusElement.innerText = `Authentication Error: ${error.message}`;
+                            authStatusElement.classList.remove('text-yellow-600');
+                            authStatusElement.classList.add('text-red-600');
+                            console.error("6. Anonymous sign-in failed:", error);
+                            // If auth fails, we still try to fetch, but it might fail due to rules
+                            isAuthReady = true; // Still set true to proceed, but expect potential permission errors
+                            fetchConversations();
+                        });
+                }
+            });
+
+        } catch (e) {
+            firebaseStatusElement.innerText = `Firebase Initialization Error: ${e.message}`;
+            firebaseStatusElement.classList.remove('text-gray-600');
+            firebaseStatusElement.classList.add('text-red-600');
+            console.error("21. FATAL ERROR during Firebase initialization or setup: ", e);
+            document.body.innerHTML = `<div class="p-4 text-center text-red-700">
+                <h2>Application Error</h2>
+                <p>Failed to initialize Firebase. Please check your console for details and ensure your Firebase configuration and internet connection are correct.</p>
+                </div>`;
+            // Prevent further execution if Firebase init fails
+            throw e; 
+        }
 
         // Function to display messages for a selected conversation
         function showConversation(phone) {
+            console.log(`7. showConversation called for phone: ${phone}`);
             chatHeader.innerHTML = `<h2 class="font-bold text-lg text-gray-800">Chat with: ${phone}</h2>`;
             messageContainer.innerHTML = '<p class="text-center text-gray-500">Loading messages...</p>';
 
             // Unsubscribe from previous listener
             if (activeConversationUnsubscribe) {
+                console.log("8. Unsubscribing from previous conversation listener.");
                 activeConversationUnsubscribe();
             }
 
+            // Construct the reference to the messages subcollection
             const messagesRef = db.collection('conversations').doc(phone).collection('messages').orderBy('timestamp', 'asc');
+            console.log("9. Message reference constructed:", messagesRef.path);
             
             activeConversationUnsubscribe = messagesRef.onSnapshot(snapshot => {
+                console.log(`10. New message snapshot received for ${phone}.`);
                 messageContainer.innerHTML = ''; // Clear previous messages
+                
+                if (snapshot.empty) {
+                    console.log(`11. Message snapshot is EMPTY for ${phone}. No messages found.`);
+                    messageContainer.innerHTML = `<p class="text-center text-gray-500">No messages for this conversation.</p>`;
+                    return;
+                }
+
+                console.log(`12. Messages found for ${phone}: ${snapshot.size}`);
                 snapshot.forEach(doc => {
                     const msg = doc.data();
+                    console.log("13. Processing message doc:", doc.id, "Data:", msg);
+
                     const bubble = document.createElement('div');
                     bubble.classList.add('p-3', 'rounded-lg', 'max-w-md', 'mb-2', 'shadow-sm');
                     
                     const content = document.createElement('p');
-                    content.innerText = msg.content;
+                    // Ensure content exists before setting innerText
+                    content.innerText = msg.content || '[No Content]'; 
                     
                     const timestamp = document.createElement('p');
                     timestamp.classList.add('text-xs', 'text-gray-500', 'mt-1', 'text-right');
-                    timestamp.innerText = msg.timestamp ? new Date(msg.timestamp.seconds * 1000).toLocaleTimeString() : '';
+                    // Ensure timestamp exists and is a Firestore Timestamp object, or provide fallback
+                    timestamp.innerText = msg.timestamp && msg.timestamp.seconds ? new Date(msg.timestamp.seconds * 1000).toLocaleString() : 'No timestamp';
 
                     if (msg.direction === 'outbound') {
                         bubble.classList.add('chat-bubble-outbound', 'ml-auto');
@@ -106,33 +189,54 @@
                 });
                 // Scroll to the bottom
                 messageContainer.scrollTop = messageContainer.scrollHeight;
+                console.log(`14. Messages rendered and scrolled for ${phone}.`);
             }, (error) => {
-                // More robust error handling
-                console.error("Firestore snapshot error: ", error);
-                messageContainer.innerHTML = `<p class="text-center text-red-500">Error loading messages. Please check the console.</p>`;
+                console.error("15. Firestore message snapshot ERROR: ", error);
+                messageContainer.innerHTML = `<p class="text-center text-red-500">Error loading messages: ${error.message}. Please check the console and Firebase Security Rules.</p>`;
             });
         }
 
-        // Listen for all conversations and update the list in real-time
-        db.collection('conversations').onSnapshot(snapshot => {
-            convoListContainer.innerHTML = '';
-            if (snapshot.empty) {
-                convoListContainer.innerHTML = '<p class="text-gray-500">No conversations yet.</p>';
+        // Function to fetch and display conversations
+        function fetchConversations() {
+            if (!isAuthReady) {
+                console.log("16. Authentication not ready yet. Skipping conversation fetch.");
                 return;
             }
-            snapshot.forEach(doc => {
-                const phone = doc.id;
-                const convoItem = document.createElement('div');
-                convoItem.classList.add('p-3', 'hover:bg-gray-100', 'cursor-pointer', 'rounded-md', 'border-b');
-                convoItem.innerText = phone;
-                convoItem.onclick = () => showConversation(phone);
-                convoListContainer.appendChild(convoItem);
+            console.log("17. Setting up conversation listener (authentication ready).");
+            db.collection('conversations').onSnapshot(snapshot => {
+                console.log("18. New conversation list snapshot received.");
+                convoListContainer.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    console.log("19. Conversation list snapshot is EMPTY. No conversations found.");
+                    convoListContainer.innerHTML = '<p class="text-gray-500">No conversations yet.</p>';
+                    return;
+                }
+
+                console.log(`20. Conversations found: ${snapshot.size}`);
+                snapshot.forEach(doc => {
+                    const phone = doc.id;
+                    console.log("21. Processing conversation doc:", doc.id);
+                    const convoItem = document.createElement('div');
+                    convoItem.classList.add('p-3', 'hover:bg-gray-100', 'cursor-pointer', 'rounded-md', 'border-b');
+                    convoItem.innerText = phone;
+                    convoItem.onclick = () => showConversation(phone);
+                    convoListContainer.appendChild(convoItem);
+                });
+                console.log("22. Conversation list rendered.");
+
+                // Automatically select the first conversation if available
+                if (snapshot.size > 0 && !activeConversationUnsubscribe) { // Only auto-select if no conversation is active
+                    const firstPhone = snapshot.docs[0].id;
+                    console.log(`23. Automatically selecting the first conversation: ${firstPhone}`);
+                    showConversation(firstPhone);
+                }
+
+            }, (error) => {
+                console.error("24. Firestore conversations listener ERROR: ", error);
+                convoListContainer.innerHTML = `<p class="text-red-500">Error loading conversations list: ${error.message}. Check console and Firebase Security Rules.</p>`;
             });
-        }, (error) => {
-            // More robust error handling
-            console.error("Firestore conversations listener error: ", error);
-            convoListContainer.innerHTML = '<p class="text-red-500">Error loading conversations list.</p>';
-        });
+        }
 
     </script>
 </body>
