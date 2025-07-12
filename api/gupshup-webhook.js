@@ -3,8 +3,7 @@
 * File: `api/gupshup-webhook.js`
 * =================================================================
 *
-* This is the final, production-ready version. It includes robust
-* error handling for the database connection.
+* This version adds detailed logging for the database connection.
 *
 */
 
@@ -13,7 +12,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 const admin = require('firebase-admin');
 
-// --- Firebase Initialization ---
+// --- Firebase Initialization with Logging ---
 let db;
 try {
   if (!admin.apps.length) {
@@ -22,10 +21,11 @@ try {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
+    console.log("Firebase Admin Initialized Successfully in gupshup-webhook.");
   }
   db = admin.firestore();
 } catch (error) {
-  console.error('Firebase Admin Initialization Error:', error);
+  console.error('Firebase Admin Initialization Error in gupshup-webhook:', error);
 }
 
 

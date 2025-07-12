@@ -3,8 +3,7 @@
 * File: `api/shopify-webhook.js`
 * =================================================================
 *
-* This is the final, production-ready version. It includes robust
-* error handling for the database connection.
+* This version adds detailed logging for the database write operation.
 *
 */
 
@@ -13,7 +12,7 @@ const crypto = require('crypto');
 const querystring = require('querystring');
 const admin = require('firebase-admin');
 
-// --- Firebase Initialization ---
+// --- Firebase Initialization with Logging ---
 let db;
 try {
   if (!admin.apps.length) {
@@ -22,10 +21,11 @@ try {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
+    console.log("Firebase Admin Initialized Successfully in shopify-webhook.");
   }
   db = admin.firestore();
 } catch (error) {
-  console.error('Firebase Admin Initialization Error:', error);
+  console.error('Firebase Admin Initialization Error in shopify-webhook:', error);
 }
 
 
@@ -173,13 +173,19 @@ module.exports = async (req, res) => {
         if (!db) {
             console.error("Firestore db object is not available. Cannot log message.");
         } else {
-            const messageLog = {
-                customerPhone: phone,
-                direction: 'outbound',
-                content: `Sent COD confirmation for order ${orderName}`,
-                timestamp: admin.firestore.FieldValue.serverTimestamp()
-            };
-            await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+            try {
+                console.log("Attempting to log outbound message to Firestore...");
+                const messageLog = {
+                    customerPhone: phone,
+                    direction: 'outbound',
+                    content: `Sent COD confirmation for order ${orderName}`,
+                    timestamp: admin.firestore.FieldValue.serverTimestamp()
+                };
+                await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+                console.log("Successfully logged outbound message to Firestore.");
+            } catch (dbError) {
+                console.error("Firestore Write Error in shopify-webhook:", dbError);
+            }
         }
 
         const tagMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
