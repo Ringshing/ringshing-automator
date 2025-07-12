@@ -3,8 +3,7 @@
 * File: `api/shopify-webhook.js`
 * =================================================================
 *
-* This is the final, self-contained version. It includes all
-* necessary code to prevent module loading errors on Vercel.
+* This version adds detailed logging for the database write operation.
 *
 */
 
@@ -14,7 +13,6 @@ const querystring = require('querystring');
 const admin = require('firebase-admin');
 
 // --- Firebase Initialization ---
-// The database connection logic is now inside this file.
 try {
   if (!admin.apps.length) {
     const serviceAccountString = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf8');
@@ -170,13 +168,22 @@ module.exports = async (req, res) => {
         const templateParams = [customerName, orderName, productName, orderAmount, advancePayment, shippingAddress];
         await sendGupshupTemplateMessage(phone, templateParams);
 
-        const messageLog = {
-            customerPhone: phone,
-            direction: 'outbound',
-            content: `Sent COD confirmation for order ${orderName}`,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        };
-        await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+        // *** UPDATED DATABASE LOGGING ***
+        try {
+            console.log("Attempting to log outbound message to Firestore...");
+            const messageLog = {
+                customerPhone: phone,
+                direction: 'outbound',
+                content: `Sent COD confirmation for order ${orderName}`,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            };
+            await db.collection('conversations').doc(phone).collection('messages').add(messageLog);
+            console.log("Successfully logged outbound message to Firestore.");
+        } catch (dbError) {
+            console.error("Firestore Write Error:", dbError);
+            // We still continue even if logging fails, but we'll see the error.
+        }
+
 
         const tagMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
         await shopifyFetch({ query: tagMutation, variables: { id: orderId, tags: ["COD-Confirmation-Sent"] } });
