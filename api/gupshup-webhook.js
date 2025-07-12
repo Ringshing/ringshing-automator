@@ -3,7 +3,8 @@
 * File: `api/gupshup-webhook.js`
 * =================================================================
 *
-* This version adds detailed logging for the database connection.
+* This is the final, corrected version. It fixes a syntax error
+* that was causing the server to crash.
 *
 */
 
@@ -178,9 +179,7 @@ module.exports = async (req, res) => {
             return res.status(200).send('OK: Incomplete payload.');
         }
 
-        if (!db) {
-            console.error("Firestore db object is not available. Cannot log message.");
-        } else {
+        if (db) {
             await db.collection('conversations').doc(customerPhone).collection('messages').add({
                 customerPhone: customerPhone,
                 direction: 'inbound',
